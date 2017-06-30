@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html>
+   <head>
+      <title>TouchDraw</title>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+      <meta name="apple-mobile-web-app-capable" content="yes"/>
+
+      <style type="text/css">
+        body{margin:0;  }
+        canvas {position: absolute; top:0; left:0; bottom:0; right: 0;}
+      </style>
+
+   </head>
+        <body>build 60 </body>
+    
+    <script src="lib/es6-promise.min.js"></script>
+    <script src="lib/nativescript-webview-interface.js"></script>
+    <script src="lib/hdpicanvas.js"></script>
+    <script type="text/javascript">
+
+
+
+        //remove defaults
+        document.ontouchstart = function(e){ e.preventDefault(); }
+        document.ontouchmove = function(e){ e.preventDefault(); }
+
+
+        //Variables
+        var width  = window.innerWidth;
+        var height = window.innerHeight;
+        var ctx;
+        var canvas;
+		var pointer = {};
+		var segments = [];
+
+
+
+// Draw segment function
+
+        function drawSegment(coords)
+        {		  
+		  segments.push(coords);
+		  
+		  ctx.beginPath();
+          ctx.moveTo(coords.sx, coords.sy);
+          ctx.lineTo(coords.ex, coords.ey);
+          ctx.stroke();
+        }
+
+      
+
+//Canvas Setup
+
+            var canvas = document.createElement("canvas");
+            document.body.appendChild(canvas);
+
+            canvas.height = height;
+            canvas.width = width;
+            ctx = canvas.getContext('2d');
+
+			//add geo tracking methods to ctx
+			trackTransforms(ctx);
+
+            //default ctx parameters
+            ctx.lineWidth = 2;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = '#29536e';
+            ctx.fillStyle = '#29536e'; 
+
+
+
+
+
+//redraw function (called everytime we move or scale)
+		function redraw()
+		{
+				// Reset the canvas
+				ctx.save();
+				ctx.setTransform(1,0,0,1,0,0);
+				ctx.clearRect(0,0,canvas.width,canvas.height);
+				ctx.restore();
+
+				// redraw all lines
+				ctx.beginPath();
+				for (var i = 0; i < segments.length; i++) 
+				{
+					ctx.moveTo(segments[i].sx, segments[i].sy);
+					ctx.lineTo(segments[i].ex, segments[i].ey);
+				}
+				ctx.stroke();
+		}
+
+
+
+
+// mouse event variables
+
+		var focusPoint = {x : canvas.width/2, y: canvas.height/2 };
+      	var dragStart;		
+		var twofingers = false;
+		var lastFingerdistance = 0;
+
+
+
+
+//Touch Start
+      function start(evt)
+	  {
+		  if(evt.touches.length == 2) //2 doigts
+			{
+				twofingers = true;
+				
+				focusPoint.x = evt.touches[0].pageX;
+				focusPoint.y = evt.touches[0].pageY;
+				dragStart = ctx.transformedPoint(focusPoint.x,focusPoint.y);
+
+				lastFingerdistance = fingerDistance(evt);
+			}
+
+		 
+		  else
+		  {
+				pointer = ctx.transformedPoint( evt.pageX, evt.pageY );
+				pointer.down = true;
+		  }
+ 
+		  
+      }
+
+//Touch Move
+      function move(evt)
+	  {
+        
+			if(twofingers)
+			{
+				
+				
+				focusPoint.x = evt.touches[0].pageX;
+				focusPoint.y = evt.touches[0].pageY;
+				
+				
+
+
+				//zoom
+				var factor = fingerDistance(evt) / lastFingerdistance
+				ctx.scale(factor,factor);
+				lastFingerdistance = fingerDistance(evt);
+
+
+				//move
+				var pt = ctx.transformedPoint(focusPoint.x,focusPoint.y);
+				ctx.translate(pt.x-dragStart.x,pt.y-dragStart.y);
+
+
+				redraw();
+			}
+
+			else if(pointer.down)
+			{
+				//oWebViewInterface.emit('drawLine',{sx : pointer.x, sy : pointer.y, ex : e.pageX, ey : e.pageY});
+				var transformed = ctx.transformedPoint( evt.pageX, evt.pageY );
+
+				drawSegment({sx : pointer.x, sy : pointer.y, ex : transformed.x, ey : transformed.y})
+				pointer.x = transformed.x;
+				pointer.y = transformed.y;
+
+
+			}
+
+		  
+      }
+
+
+//Touch End
+      function end(evt)
+	  {
+        
+		  if(twofingers)
+			{
+				twofingers = false;
+				dragStart = null;
+			}
+		  else
+		  {
+			pointer.down = false;  
+		  }
+		  
+
+      }
+
+
+	  canvas.addEventListener('touchstart',start,false);
+	  canvas.addEventListener('touchmove',move,false);
+	  canvas.addEventListener('touchend',end,false);
+
+
+
+
+//Calculate finger distance
+
+	  function fingerDistance(e)
+	  {
+		  return Math.sqrt( (e.touches[0].pageX -e.touches[1].pageX) * (e.touches[0].pageX - e.touches[1].pageX ) + (e.touches[0].pageY - e.touches[1].pageY) * (e.touches[0].pageY - e.touches[1].pageY));
+	  }
+
+
+
+
+
+
+
+//tracktransforms
+		function trackTransforms(ctx)
+		{
+			var svg = document.createElementNS("http://www.w3.org/2000/svg",'svg');
+			var xform = svg.createSVGMatrix();
+			ctx.getTransform = function(){ return xform; };
+
+			var savedTransforms = [];
+			var save = ctx.save;
+			ctx.save = function(){
+				savedTransforms.push(xform.translate(0,0));
+				return save.call(ctx);
+			};
+			
+			var restore = ctx.restore;
+			ctx.restore = function(){
+				xform = savedTransforms.pop();
+				return restore.call(ctx);
+					};
+
+			var scale = ctx.scale;
+			ctx.scale = function(sx,sy){
+				xform = xform.scaleNonUniform(sx,sy);
+				return scale.call(ctx,sx,sy);
+					};
+			
+			var rotate = ctx.rotate;
+			ctx.rotate = function(radians){
+				xform = xform.rotate(radians*180/Math.PI);
+				return rotate.call(ctx,radians);
+			};
+			
+			var translate = ctx.translate;
+			ctx.translate = function(dx,dy){
+				xform = xform.translate(dx,dy);
+				return translate.call(ctx,dx,dy);
+			};
+			
+			var transform = ctx.transform;
+			ctx.transform = function(a,b,c,d,e,f){
+				var m2 = svg.createSVGMatrix();
+				m2.a=a; m2.b=b; m2.c=c; m2.d=d; m2.e=e; m2.f=f;
+				xform = xform.multiply(m2);
+				return transform.call(ctx,a,b,c,d,e,f);
+			};
+			
+			var setTransform = ctx.setTransform;
+			ctx.setTransform = function(a,b,c,d,e,f){
+				xform.a = a;
+				xform.b = b;
+				xform.c = c;
+				xform.d = d;
+				xform.e = e;
+				xform.f = f;
+				return setTransform.call(ctx,a,b,c,d,e,f);
+			};
+			
+			var pt  = svg.createSVGPoint();
+			ctx.transformedPoint = function(x,y){
+				pt.x=x; pt.y=y;
+				return pt.matrixTransform(xform.inverse());
+			}
+			}
+
+      </script>
+</html>
+
+
+
